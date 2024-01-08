@@ -72,7 +72,7 @@ def prepare_dataset(args):
     return train_ds, val_ds
 
 
-def create_model(args):
+def create_model(args, model_type):
     input_shape = (args.img_height, args.img_width, 3)
     base_model = efn.EfficientNetB3(
         input_shape=input_shape, weights=args.checkpoint_option, include_top=False
@@ -109,8 +109,9 @@ def create_model(args):
     # when we unfreeze the base model for fine-tuning, so we make sure that the
     # base_model is running in inference mode here.
     x = base_model(inputs, training=False)
-    x = resnet_block(x, filters=512, reps=3, strides=2)
-    x = resnet_block(x, filters=512, reps=3, strides=2)
+    if model_type == "cancer":
+        x = resnet_block(x, filters=512, reps=3, strides=2)
+        x = resnet_block(x, filters=512, reps=3, strides=2)
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
     x = tf.keras.layers.Dense(2)(x)
     outputs = tf.keras.layers.Softmax()(x)
@@ -119,12 +120,12 @@ def create_model(args):
     return model
 
 
-def train(train_ds, val_ds, args):
+def train(train_ds, val_ds, args, model_type):
     strategy = tf.distribute.MirroredStrategy()
 
     # create and compile the model
     with strategy.scope():
-        model = create_model(args)
+        model = create_model(args, model_type)
         optimizer = tf.keras.optimizers.SGD(momentum=0.9)
         model.compile(
             optimizer=optimizer,
@@ -166,13 +167,25 @@ def main(args):
     train_ds, val_ds = prepare_dataset(args)
 
     # start training
-    train(train_ds, val_ds, args)
+    model_type = args.model_type
+    train(train_ds, val_ds, args, model_type)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Cancer or Risk Predictor")
-    parser.add_argument("--data_folder", type=str, default="all_trainval")
-    parser.add_argument("--model_folder", type=str, default="models")
+    parser.add_argument(
+        "--data_folder", type=str, required=True, help="Path to the data folder"
+    )
+    parser.add_argument(
+        "--model_dir", type=str, required=True, help="Directory to save models and logs"
+    )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        required=True,
+        choices=["cancer", "risk"],
+        help="Type of model to train: 'cancer' or 'risk'",
+    )
     parser.add_argument("--num_epoch", type=int, default=50)
     parser.add_argument("--decay_epoch", type=int, default=50)
     parser.add_argument("--img_height", type=int, default=1024)
